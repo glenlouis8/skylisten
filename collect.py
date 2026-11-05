@@ -21,22 +21,34 @@ def current_filename():
     return f"data/bronze/posts-{now:%Y-%m-%d-%H}.jsonl.gz"
 
 
-async def main():
+async def listen():
     cursor = load_cursor()
     url = f"{URL}&cursor={cursor}" if cursor else URL
     async with websockets.connect(url) as ws:
         current = current_filename()
         f = gzip.open(current, "at")
-        async for message in ws:
-            name = current_filename()
-            if name != current:
-                f.close()
-                current = name
-                f = open(current, "a")
-            f.write(message + "\n")
-            data = json.loads(message)
-            with open("data/cursor.txt", "w") as c:
-                c.write(str(data["cursor"]))
+        try:
+            async for message in ws:
+                name = current_filename()
+                if name != current:
+                    f.close()
+                    current = name
+                    f = gzip.open(current, "at")
+                f.write(message + "\n")
+                data = json.loads(message)
+                with open("data/cursor.txt", "w") as c:
+                    c.write(str(data["cursor"]))
+        finally:
+            f.close()
+
+
+async def main():
+    while True:
+        try:
+            await listen()
+        except Exception as e:
+            print("connection lost:", e)
+            await asyncio.sleep(5)
 
 
 asyncio.run(main())
