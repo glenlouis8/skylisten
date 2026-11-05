@@ -5,3 +5,5 @@ data/
 CLAUDE.md
 
 docs/HANDOFF.md
+
+__pycache__/
