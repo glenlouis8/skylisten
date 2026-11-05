@@ -1,0 +1,7 @@
+data/
+.env
+.venv/
+
+CLAUDE.md
+
+docs/HANDOFF.md
