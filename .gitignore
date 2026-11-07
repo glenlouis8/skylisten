@@ -7,3 +7,8 @@ CLAUDE.md
 docs/HANDOFF.md
 
 __pycache__/
+
+airflow/logs/
+
+airflow/config/
+.DS_Store
