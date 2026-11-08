@@ -5,6 +5,8 @@ import os
 import json
 from datetime import datetime, timedelta
 
+import boto3
+
 with DAG(
     dag_id="bronze_check",
     schedule="@hourly",
@@ -37,5 +39,15 @@ with DAG(
             raise ValueError(f"only {count} posts in {path}")
         return count
 
+    @task
+    def upload_to_s3(path):
+        name = os.path.basename(path)
+        year, month, day = name.split("-")[1:4]
+        key = f"bronze/{year}/{month}/{day}/{name}"
+        boto3.client("s3").upload_file(path, os.environ["S3_BUCKET"], key)
+        return key
+
     path = check_file_exists()
-    check_file_healthy(path)
+    healthy = check_file_healthy(path)
+    uploaded = upload_to_s3(path)
+    healthy >> uploaded
