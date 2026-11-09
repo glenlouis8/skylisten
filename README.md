@@ -18,7 +18,8 @@ collect.py  ->  data/bronze/posts-YYYY-MM-DD-HH.jsonl.gz   (raw, one file per UT
 Airflow (Docker Compose, hourly)  ->  bronze_check DAG  ->  upload to S3 bronze
         |
         v
-PySpark silver (Parquet, by date/hour)  ->  apply_deletes cleanup
+Airflow silver_hourly DAG  ->  starts a Spark container:
+    PySpark silver (Parquet, by date/hour)  ->  apply_deletes cleanup
         |
         v   (planned)
 dbt gold -> Athena -> Streamlit
@@ -32,9 +33,10 @@ dbt gold -> Athena -> Streamlit
 | Airflow in Docker Compose (LocalExecutor + Postgres) | working |
 | `bronze_check` DAG: last hour's file exists, is valid gzip, has the key fields, has enough posts | working |
 | Hourly upload of checked files to S3 bronze | working |
-| PySpark silver (`spark/silver.py`): fixed schema, English + non-empty text, hashed author id, in-file deletes, Parquet by date/hour | working, run by hand for now |
-| `spark/apply_deletes.py`: removes posts deleted hours later from old silver folders | working, run by hand for now |
-| Airflow triggering Spark, dbt gold, dashboard | planned |
+| PySpark silver (`spark/silver.py`): fixed schema, English + non-empty text, hashed author id, in-file deletes, Parquet by date/hour | working |
+| `spark/apply_deletes.py`: removes posts deleted hours later from old silver folders | working |
+| `silver_hourly` DAG: Airflow starts the Spark container (DockerOperator), silver then cleanup | tested with `dags test`, both tasks pass |
+| dbt gold, Athena, dashboard | planned |
 | Sentiment / topic labels, streaming, agent | planned, after the pipeline works |
 
 ## What I measured
@@ -91,7 +93,9 @@ docker run --rm -v "$PWD/data/silver:/silver" -v "$PWD/spark:/app" apache/spark:
 
 - Files are named by arrival time, not post time, so a replay after downtime lands in one big file. Silver will sort posts by their own timestamp.
 - The collector rewrites its cursor file on every post. Fine for now, wasteful at scale.
-- Silver for hour H reads files H and H+1, so it must run after hour H+1 has finished.
+- Silver for hour H reads files H and H+1, so it must run after hour H+1 has finished. The DAG builds the hour two hours back for that reason.
+- Airflow starts Spark through the Docker socket (`/var/run/docker.sock` mounted into Airflow). That gives Airflow control of the host's Docker. Fine on a laptop, not something to copy to production.
+- The `silver_hourly` DAG has `/Users/glenlouis/Coding/skylisten` hard-coded for the volume mounts.
 - Silver writes about 10 small Parquet files per hour. Fewer, larger files would query faster.
 - Silver reads the local bronze copy, not S3 yet.
 - Posts with no language tag are dropped, which loses some real English posts.
