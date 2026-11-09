@@ -92,3 +92,15 @@ out = silver.withColumn("date", date_format("event_time", "yyyy-MM-dd")).withCol
     "hour", date_format("event_time", "HH")
 )
 out.write.mode("overwrite").partitionBy("date", "hour").parquet("/silver/posts")
+
+removed = (
+    deletes.select(
+        "author_hash",
+        col("commit.rkey").alias("rkey"),
+        (col("time_us") / 1000000).cast("timestamp").alias("deleted_at"),
+    )
+    .withColumn("date", date_format("deleted_at", "yyyy-MM-dd"))
+    .withColumn("hour", date_format("deleted_at", "HH"))
+)
+removed.write.mode("overwrite").partitionBy("date", "hour").parquet("/silver/removed")
+print("removed list rows:", removed.count())
