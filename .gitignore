@@ -12,3 +12,6 @@ airflow/logs/
 
 airflow/config/
 .DS_Store
+dbt/logs/
+dbt/target/
+dbt/dbt_packages/

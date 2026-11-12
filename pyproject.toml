@@ -3,5 +3,6 @@ name = "skylisten"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "dbt-duckdb>=1.11.1",
     "websockets>=17.4",
 ]

@@ -1,0 +1,4 @@
+name: skylisten
+version: "1.0.0"
+profile: skylisten
+model-paths: ["models"]
