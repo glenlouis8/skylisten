@@ -16,6 +16,10 @@ from pyspark.sql import SparkSession
 spark = SparkSession.builder.appName("apply_deletes").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
+# Keep folder-name columns as text. Otherwise hour=09 is read as the number 9,
+# and the folder swap below looks for hour=9, which does not exist.
+spark.conf.set("spark.sql.sources.partitionColumnTypeInference.enabled", "false")
+
 POSTS = "/silver/posts"
 FIXED = "/silver/posts_fixed"  # side folder for the cleaned copy
 
