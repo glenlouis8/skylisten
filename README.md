@@ -21,8 +21,11 @@ Airflow (Docker Compose, hourly)  ->  bronze_check DAG  ->  upload to S3 bronze
 Airflow silver_hourly DAG  ->  starts a Spark container:
     PySpark silver (Parquet, by date/hour)  ->  apply_deletes cleanup
         |
+        v
+dbt + DuckDB gold (posts_per_hour, brand_mentions_per_day)
+        |
         v   (planned)
-dbt gold -> Athena -> Streamlit
+Athena -> Streamlit
 ```
 
 ## Status
@@ -36,7 +39,8 @@ dbt gold -> Athena -> Streamlit
 | PySpark silver (`spark/silver.py`): fixed schema, English + non-empty text, hashed author id, in-file deletes, Parquet by date/hour | working |
 | `spark/apply_deletes.py`: removes posts deleted hours later from old silver folders | working |
 | `silver_hourly` DAG: Airflow starts the Spark container (DockerOperator), silver then cleanup | tested with `dags test`, both tasks pass |
-| dbt gold, Athena, dashboard | planned |
+| dbt + DuckDB gold: `posts_per_hour`, `brand_mentions_per_day` (nvidia, apple, tesla), one volume test | working, run by hand |
+| Airflow running dbt, Athena, dashboard | planned |
 | Sentiment / topic labels, streaming, agent | planned, after the pipeline works |
 
 ## What I measured
@@ -48,6 +52,9 @@ dbt gold -> Athena -> Streamlit
 - About 64% of posts in the hours I tested were tagged English (124,983 of 193,870 in one hour). Posts with no language tag are dropped.
 - About 1 in 64 posts is deleted within the same hour it was written (1,878 of 120,225 in one hour).
 - With silver built for 7 hours, 1,031 of 776,186 posts (0.13%) had been deleted after their hour was already processed. `apply_deletes.py` removed them. Average age at delete in that sample was 2.9 hours; the sample is too short to know the longest.
+
+- Gold test caught a wrong threshold: copying the bronze limit (50,000 posts/hour, all languages) failed on 8 quiet night hours. English-only gold is about 60% of that, so the limit is 30,000 (quietest real hour: 43,087).
+- Brand mention counts so far: 5 days of data, 82 hours of silver. Counts use whole-word, case-insensitive matches, so "apple" also counts the fruit.
 
 ## Data handling
 
@@ -101,3 +108,6 @@ docker run --rm -v "$PWD/data/silver:/silver" -v "$PWD/spark:/app" apache/spark:
 - Posts with no language tag are dropped, which loses some real English posts.
 - Image-only posts are dropped. Image content is not analyzed.
 - `apply_deletes.py` swaps folders in two steps, so a crash in the middle could leave a folder missing. Bronze can rebuild it.
+- About 41 hours of collection were lost (Nov 11 05 UTC to Nov 12 21 UTC) because the collector was stopped. Jetstream replayed about one hour on restart.
+- `apply_deletes.py` failed on every scheduled run from Nov 9 to Nov 12 (62 failed runs) because Spark read the folder name `hour=09` as the number 9. Fixed by turning off partition type inference. `build_silver` was fine the whole time.
+- dbt models are run by hand, not by Airflow yet. `brand_mentions_per_day` rescans all of silver each run (about 30 seconds for 7 million posts).
