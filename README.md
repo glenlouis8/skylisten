@@ -18,14 +18,14 @@ collect.py  ->  data/bronze/posts-YYYY-MM-DD-HH.jsonl.gz   (raw, one file per UT
 Airflow (Docker Compose, hourly)  ->  bronze_check DAG  ->  upload to S3 bronze
         |
         v
-Airflow silver_hourly DAG  ->  starts a Spark container:
-    PySpark silver (Parquet, by date/hour)  ->  apply_deletes cleanup
+Airflow silver_hourly DAG, one task per step, each in its own Docker container:
+    build_silver (PySpark, Parquet by date/hour)
+      -> apply_deletes (cleanup)
+      -> dbt_run (gold tables in DuckDB)
+      -> dbt_test (quality test)
         |
         v
-dbt + DuckDB gold (posts_per_hour, brand_mentions_per_day)
-        |
-        v   (planned)
-Athena -> Streamlit
+Streamlit dashboard (reads gold)
 ```
 
 ## Status
@@ -38,9 +38,10 @@ Athena -> Streamlit
 | Hourly upload of checked files to S3 bronze | working |
 | PySpark silver (`spark/silver.py`): fixed schema, English + non-empty text, hashed author id, in-file deletes, Parquet by date/hour | working |
 | `spark/apply_deletes.py`: removes posts deleted hours later from old silver folders | working |
-| `silver_hourly` DAG: Airflow starts the Spark container (DockerOperator), silver then cleanup | tested with `dags test`, both tasks pass |
-| dbt + DuckDB gold: `posts_per_hour`, `brand_mentions_per_day` (nvidia, apple, tesla), one volume test | working, run by hand |
-| Airflow running dbt, Athena, dashboard | planned |
+| dbt + DuckDB gold: `posts_per_hour`, `brand_mentions_per_day` (nvidia, apple, tesla), one volume test | working |
+| `silver_hourly` DAG: build_silver, apply_deletes, dbt_run, dbt_test, chained, each a DockerOperator | working, runs hourly |
+| Streamlit dashboard (`dashboard/app.py`): brand mentions per day, complete days only | working, started by hand |
+| Spike detection, sentiment, Athena | planned |
 | Sentiment / topic labels, streaming, agent | planned, after the pipeline works |
 
 ## What I measured
@@ -84,6 +85,18 @@ docker compose up -d
 
 Web UI at http://localhost:8080.
 
+Dashboard (stop it before running dbt by hand, since it can lock the gold file):
+
+```bash
+uv run streamlit run dashboard/app.py
+```
+
+dbt image, built once, used by Airflow:
+
+```bash
+docker build -t skylisten-dbt dbt
+```
+
 Silver, for one UTC hour (needs `spark/.env` with `HASH_SALT`, and `data/silver` to exist):
 
 ```bash
@@ -110,4 +123,7 @@ docker run --rm -v "$PWD/data/silver:/silver" -v "$PWD/spark:/app" apache/spark:
 - `apply_deletes.py` swaps folders in two steps, so a crash in the middle could leave a folder missing. Bronze can rebuild it.
 - About 41 hours of collection were lost (Nov 11 05 UTC to Nov 12 21 UTC) because the collector was stopped. Jetstream replayed about one hour on restart.
 - `apply_deletes.py` failed on every scheduled run from Nov 9 to Nov 12 (62 failed runs) because Spark read the folder name `hour=09` as the number 9. Fixed by turning off partition type inference. `build_silver` was fine the whole time.
-- dbt models are run by hand, not by Airflow yet. `brand_mentions_per_day` rescans all of silver each run (about 30 seconds for 7 million posts).
+- `brand_mentions_per_day` rescans all of silver each run (about 20 to 30 seconds for 7 million posts). Fine now, would need incremental models at larger sizes.
+- Streamlit is started by hand and closes the gold database after each read, so a refresh during the dbt build can show an error.
+- Silver has holes if Airflow or Docker was off, because `catchup=False`. The dashboard only draws days with all 24 hours, which exposed two missing hours that were then backfilled by hand.
+- The DAG is still named `silver_hourly` although it now also runs dbt. Its volume paths are hard-coded to this laptop.
