@@ -36,6 +36,8 @@ Streamlit dashboard (reads gold)
 | Airflow in Docker Compose (LocalExecutor + Postgres) | working |
 | `bronze_check` DAG: last hour's file exists, is valid gzip, has the key fields, has enough posts | working |
 | Hourly upload of checked files to S3 bronze | working |
+| Freshness check: task fails if no bronze file was touched in 2 hours | working (passing side tested) |
+| 14-day retention: deletes local bronze older than 14 days only if S3 has the same file at the same size | working, delete logic tested on scratch copies |
 | PySpark silver (`spark/silver.py`): fixed schema, English + non-empty text, hashed author id, in-file deletes, Parquet by date/hour | working |
 | `spark/apply_deletes.py`: removes posts deleted hours later from old silver folders | working |
 | dbt + DuckDB gold: `posts_per_hour`, `brand_mentions_per_day` (nvidia, apple, tesla), one volume test | working |
@@ -66,7 +68,7 @@ The feed contains personal data (every post has a user ID). Rules for this proje
 - Delete events are kept in bronze. Silver applies them in two places: inside each job, and later by `apply_deletes.py`, which checks a saved list of removed posts against all of silver.
 - User IDs are hashed in silver with a secret salt (in `spark/.env`, never committed). Gold will have none (planned).
 - The dashboard will show aggregates only, never individual posts or users (planned).
-- Raw files are deleted after 14 days (planned).
+- Local raw files are deleted after 14 days, but only when a same-size copy is in S3. S3 copies and silver/gold are not expired yet, so a deleted post can live on in those until that is built.
 
 ## Run it
 
@@ -110,6 +112,10 @@ docker run --rm -v "$PWD/data/silver:/silver" -v "$PWD/spark:/app" apache/spark:
 ```
 
 ## Known issues
+
+- Files before Nov 6 were never uploaded to S3, so retention will refuse to delete them (the task turns red) until they are backfilled.
+- Airflow has write access to `data/` so it can delete old raw files.
+- Freshness only raises a failed task. There is no email or chat alert yet.
 
 - Files are named by arrival time, not post time, so a replay after downtime lands in one big file. Silver will sort posts by their own timestamp.
 - The collector rewrites its cursor file on every post. Fine for now, wasteful at scale.
