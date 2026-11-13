@@ -4,7 +4,7 @@ from airflow.sdk import DAG, task, get_current_context
 import os
 import json
 from datetime import datetime, timedelta
-
+import time
 import boto3
 
 with DAG(
@@ -47,7 +47,21 @@ with DAG(
         boto3.client("s3").upload_file(path, os.environ["S3_BUCKET"], key)
         return key
 
+    @task
+    def check_collector_fresh():
+        folder = "/opt/airflow/data/bronze"
+        newest = max(
+            os.path.getmtime(os.path.join(folder, f)) for f in os.listdir(folder)
+        )
+        age_hours = (time.time() - newest) / 3600
+        if age_hours > 2:
+            raise ValueError(
+                f"no new data for {age_hours:.1f} hours, collector may be down"
+            )
+        return round(age_hours, 2)
+
     path = check_file_exists()
     healthy = check_file_healthy(path)
     uploaded = upload_to_s3(path)
     healthy >> uploaded
+    check_collector_fresh()
