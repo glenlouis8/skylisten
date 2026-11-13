@@ -11,6 +11,11 @@ mounts = [
     Mount(source=f"{PROJECT}/spark", target="/app", type="bind"),
 ]
 
+dbt_mounts = [
+    Mount(source=f"{PROJECT}/data", target="/data", type="bind"),
+    Mount(source=f"{PROJECT}/dbt", target="/dbt", type="bind"),
+]
+
 with DAG(
     dag_id="silver_hourly",
     schedule="@hourly",
@@ -42,4 +47,22 @@ with DAG(
         command=["/opt/spark/bin/spark-submit", "/app/apply_deletes.py"],
     )
 
-    build_silver >> apply_deletes
+    dbt_run = DockerOperator(
+        task_id="dbt_run",
+        image="skylisten-dbt",
+        mounts=dbt_mounts,
+        mount_tmp_dir=False,
+        auto_remove="success",
+        command="dbt run --profiles-dir /dbt --project-dir /dbt",
+    )
+
+    dbt_test = DockerOperator(
+        task_id="dbt_test",
+        image="skylisten-dbt",
+        mounts=dbt_mounts,
+        mount_tmp_dir=False,
+        auto_remove="success",
+        command="dbt test --profiles-dir /dbt --project-dir /dbt",
+    )
+
+    build_silver >> apply_deletes >> dbt_run >> dbt_test
